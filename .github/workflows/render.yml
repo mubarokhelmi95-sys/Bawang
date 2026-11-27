@@ -1,0 +1,105 @@
+name: Render video MP4
+
+on:
+  workflow_dispatch:
+    inputs:
+      tinggi:
+        description: "Tinggi video (1280 = 720x1280, 1920 = 1080x1920)"
+        default: "1280"
+        type: choice
+        options:
+          - "1280"
+          - "1920"
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Pasang ffmpeg dan puppeteer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm install puppeteer@23
+
+      - name: Tulis skrip render
+        run: |
+          cat > render.mjs <<'EOF'
+          import puppeteer from 'puppeteer';
+          import {spawn} from 'child_process';
+
+          const FPS = 30, DUR = 50.97;
+          const Q = process.env.TINGGI || '1280';
+
+          const browser = await puppeteer.launch({
+            headless: 'new',
+            args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader',
+                   '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
+          });
+          const page = await browser.newPage();
+          page.on('console', m => console.log('[page]', m.text()));
+          page.on('pageerror', e => console.log('[pageerror]', e.message));
+          await page.setViewport({width: 720, height: 1280});
+          await page.goto('http://localhost:8080/index.html?q=' + Q, {waitUntil: 'networkidle0', timeout: 300000});
+          await page.waitForFunction('window.__ready === true', {timeout: 300000});
+          console.log('Halaman siap, mulai render...');
+
+          const ff = spawn('ffmpeg', [
+            '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
+            '-i', 'bawang_mix.mp3',
+            '-map', '0:v', '-map', '1:a',
+            '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-t', String(DUR), '-movflags', '+faststart',
+            'video-bawang.mp4'
+          ], {stdio: ['pipe', 'inherit', 'inherit']});
+          const done = new Promise((res, rej) => {
+            ff.on('close', c => c === 0 ? res() : rej(new Error('ffmpeg exit ' + c)));
+          });
+
+          const total = Math.ceil(DUR * FPS);
+          for (let i = 0; i < total; i++) {
+            const b64 = await page.evaluate(t => window.__renderAt(t), Math.min(i / FPS, DUR - 0.001));
+            const buf = Buffer.from(b64, 'base64');
+            if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r));
+            if (i % 60 === 0) console.log('Frame ' + i + ' / ' + total);
+          }
+          ff.stdin.end();
+          await done;
+          await browser.close();
+          console.log('Selesai: video-bawang.mp4');
+          EOF
+
+      - name: Jalankan server lokal
+        run: |
+          python3 -m http.server 8080 &
+          sleep 2
+
+      - name: Render
+        env:
+          TINGGI: ${{ github.event.inputs.tinggi }}
+        run: node render.mjs
+
+      - name: Simpan sebagai artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-bawang
+          path: video-bawang.mp4
+
+      - name: Buat Release (unduh langsung MP4)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "video-${{ github.run_number }}" video-bawang.mp4 \
+            --title "Video Bawang #${{ github.run_number }}" \
+            --notes "Hasil render otomatis. Tap video-bawang.mp4 di bawah untuk mengunduh."
+            
