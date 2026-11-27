@@ -20,7 +20,7 @@ button:disabled{opacity:.5}
 #err{display:none;position:fixed;left:8px;right:8px;bottom:70px;background:#400d;color:#ffd0d0;padding:10px;border-radius:8px;font:12px/1.4 monospace;white-space:pre-wrap;z-index:9;max-height:30vh;overflow:auto}
 #status{font-size:13px;opacity:.8}
 </style>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
 <div id="wrap">
  <div id="stage"><canvas id="view"></canvas>
@@ -560,12 +560,13 @@ async function main(){
     if(!window.MediaRecorder){showErr('Browser tidak mendukung MediaRecorder. Gunakan Chrome/Edge.');return}
     const stream=view.captureStream(30);
     try{const as=aud.captureStream?aud.captureStream():aud.mozCaptureStream();as.getAudioTracks().forEach(tr=>stream.addTrack(tr))}catch(e){showErr('Audio tidak ikut terekam: '+e.message)}
-    const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+    const mime=['video/mp4;codecs=avc1.640028,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
     rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:14e6});chunks=[];
     rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-    rec.onstop=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));a.download='video-bawang.webm';a.click();$('rec').textContent='⏺ Rekam';recording=false};
+    rec.onstop=()=>{const isMp4=mime&&mime.startsWith('video/mp4');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(chunks,{type:isMp4?'video/mp4':'video/webm'}));a.download=isMp4?'video-bawang.mp4':'video-bawang.webm';a.click();$('rec').textContent='⏺ Rekam';recording=false};
     recording=true;$('rec').textContent='⏹ Berhenti';setT(0);rec.start(250);await play();
   };
+  window.__renderAt=t=>{frame(t);return view.toDataURL('image/jpeg',0.95).split(',')[1]};window.__ready=true;
   setT(0);$('status').textContent='';$('start').disabled=false;$('start').textContent='▶ Putar';requestAnimationFrame(loop);
 }
 main().catch(e=>{showErr(e.message||String(e));$('status').textContent='Gagal memuat — lihat pesan error di bawah.'});
